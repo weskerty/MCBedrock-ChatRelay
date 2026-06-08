@@ -18,13 +18,14 @@ class ChatRelay(Plugin):
     def install(self):
         folder = Path(self.data_folder)
         folder.mkdir(parents=True, exist_ok=True)
+        (folder / "fonts").mkdir(exist_ok=True)
         cfg_path = folder / "config.yml"
         self.yml = YAML()
         self.yml.version = (1, 2)
         self.yml.preserve_quotes = True
         defaults = [
             ("webhook_url", "", "Discord webhook URL"),
-            ("font_path", "", "Path to custom font file"),
+            ("fonts", [], "List of font filenames (searched in the 'fonts' folder) or full paths. Supports fallbacks."),
             ("player_message_type", "image", 'ONLY applies to player messages. Options: image | plaintext | embed. Use any other option to not send these messages at all.'),
             ("join_or_leave_message_type", "image", 'ONLY applies to join/leave messages. Options: image | plaintext | embed. Use any other option to not send these messages at all.'),
             ("other_messages_type", "image", 'ONLY applies to messages not listed beforehand (death messages, broadcasted messages...). Options: image | "plaintext | embed. Use any other option to not send these messages at all.'),
@@ -45,6 +46,12 @@ class ChatRelay(Plugin):
                 existing = self.yml.load(f)
             if not isinstance(existing, CommentedMap):
                 existing = CommentedMap(existing or {})
+            
+            # Migration
+            if "font_path" in existing:
+                old_path = existing.pop("font_path")
+                if old_path and "fonts" not in existing:
+                    existing["fonts"] = [old_path]
         else:
             existing = CommentedMap()
 
@@ -62,9 +69,27 @@ class ChatRelay(Plugin):
         self.install()
 
         self.webhook_url = cast(str, self.yaml_config.get("webhook_url"))
-        self.font_path = cast(str, self.yaml_config.get("font_path"))
-        if not self.webhook_url or not self.font_path:
-            self.logger.error("Chatrelay will NOT function! Fill out both `webhook_url` and `font_path` before reloading the plugin.")
+        config_fonts = self.yaml_config.get("fonts", [])
+        if isinstance(config_fonts, str):
+            config_fonts = [config_fonts]
+        
+        self.resolved_fonts = []
+        fonts_dir = Path(self.data_folder) / "fonts"
+        for f in config_fonts:
+            p = Path(f)
+            if p.exists():
+                self.resolved_fonts.append(str(p.absolute()))
+            else:
+                p_local = fonts_dir / f
+                if p_local.exists():
+                    self.resolved_fonts.append(str(p_local.absolute()))
+                else:
+                    self.logger.error(f"Font not found: {f} (checked absolute path and {fonts_dir})")
+
+        if not self.webhook_url:
+            self.logger.error("Chatrelay will NOT function! Fill out `webhook_url` before reloading the plugin.")
+        elif not self.resolved_fonts:
+            self.logger.error("Chatrelay will NOT function! No valid fonts found in `fonts` config.")
         else:
             self.register_events(self)
         self.logger.info("If your config is bad, delete it and Chatrelay will make a new one for you.")
@@ -141,15 +166,35 @@ class ChatRelay(Plugin):
         chunks = self.parse_minecraft(message)
 
         max_width, max_height, padding = 512, 30, 5
-        font = ImageFont.truetype(self.font_path, max_height)
+        
+        loaded_fonts = []
+        for f_path in self.resolved_fonts:
+            try:
+                loaded_fonts.append(ImageFont.truetype(f_path, max_height))
+            except Exception:
+                continue
+        
+        if not loaded_fonts:
+            return
+
+        def get_font_for_char(c):
+            if c.isspace():
+                return loaded_fonts[0]
+            for f in loaded_fonts:
+                if f.getmask(c).getbbox() is not None:
+                    return f
+            return loaded_fonts[0]
+
+        def text_width(t: str):
+            w = 0
+            for c in t:
+                f = get_font_for_char(c)
+                w += f.getlength(c)
+            return w
 
         lines = []
         current_line = []
         current_width = 0
-
-        def text_width(t: str):
-            bbox = font.getbbox(t)
-            return bbox[2] - bbox[0]
 
         for text, style in chunks:
             parts = re.split(r"( )", text)
@@ -173,15 +218,18 @@ class ChatRelay(Plugin):
             img = Image.new("RGBA", (max_width, max_height), (0, 0, 0, 0))
             draw = ImageDraw.Draw(img)
 
-            sample_text = "".join(t for t, _ in line)
-            bbox = font.getbbox(sample_text)
+            # Estimate y position using the first font's metrics
+            sample_font = loaded_fonts[0]
+            bbox = sample_font.getbbox("Ay")
             y = (max_height - (bbox[3] - bbox[1])) // 2
 
             x = padding
             for text, style in line:
                 color = tuple(int(style["color"][i:i+2], 16) for i in (1, 3, 5)) + (255,)
-                draw.text((x, y), text, font=font, fill=color)
-                x += text_width(text)
+                for c in text:
+                    f = get_font_for_char(c)
+                    draw.text((x, y), c, font=f, fill=color)
+                    x += f.getlength(c)
 
             png_path = folder / f"mc_render_{int(time.time()*1000)}.png"
             img.save(png_path)
