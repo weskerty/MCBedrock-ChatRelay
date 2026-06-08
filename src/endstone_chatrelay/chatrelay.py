@@ -8,12 +8,52 @@ from PIL import Image, ImageDraw, ImageFont
 import re
 import time
 import requests
-from typing import cast
+from typing import cast, Any
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap 
+from pydantic import BaseModel, Field
+from .etc import commented_map_to_dict
+
+class MessageTypeConfig(BaseModel):
+    player: str = "image"
+    join_leave: str = "image"
+    other: str = "image"
+
+class EmbedColorConfig(BaseModel):
+    player: int = 5614830
+    join_leave: int = 3066993
+    other: int = 15158332
+
+class EmbedTitleConfig(BaseModel):
+    player: str = "Chat"
+    join_leave: str = "Server Event"
+    other: str = "Server Notification"
+
+class EmbedAvatarConfig(BaseModel):
+    player: bool = True
+    join_leave: bool = True
+    other: bool = False
+
+class EmbedConfig(BaseModel):
+    color: EmbedColorConfig = Field(default_factory=EmbedColorConfig)
+    title: EmbedTitleConfig = Field(default_factory=EmbedTitleConfig)
+    footer_text: str = "Chatrelay"
+    avatar: EmbedAvatarConfig = Field(default_factory=EmbedAvatarConfig)
+
+class ChatRelayConfig(BaseModel):
+    webhook_url: str = ""
+    fonts: list[str] = Field(default_factory=list)
+    message_type: MessageTypeConfig = Field(default_factory=MessageTypeConfig)
+    show_warning_on_bad_config_value: bool = False
+    embed: EmbedConfig = Field(default_factory=EmbedConfig)
 
 class ChatRelay(Plugin):
     api_version = "0.11"
+    _config: ChatRelayConfig
+
+    @property
+    def config(self) -> ChatRelayConfig:
+        return self._config
 
     def install(self):
         folder = Path(self.data_folder)
@@ -26,20 +66,20 @@ class ChatRelay(Plugin):
         defaults = [
             ("webhook_url", "", "Discord webhook URL"),
             ("fonts", [], "List of font filenames (searched in the 'fonts' folder) or full paths. Supports fallbacks."),
-            ("player_message_type", "image", 'ONLY applies to player messages. Options: image | plaintext | embed. Use any other option to not send these messages at all.'),
-            ("join_or_leave_message_type", "image", 'ONLY applies to join/leave messages. Options: image | plaintext | embed. Use any other option to not send these messages at all.'),
-            ("other_messages_type", "image", 'ONLY applies to messages not listed beforehand (death messages, broadcasted messages...). Options: image | "plaintext | embed. Use any other option to not send these messages at all.'),
-            ("show_warning_on_bad_config_value", False, "Weather to log warnings if a key is wrong. Certain keys (like the three before this one) let you use an invalid option for some special functionality."),
-            ("embed_color_player", 5614830, "Embed color for player messages (decimal format)"),
-            ("embed_color_join_leave", 3066993, "Embed color for join/leave messages (decimal format)"),
-            ("embed_color_other", 15158332, "Embed color for other messages (decimal format)"),
-            ("embed_title_player", "Chat", "Embed title for player messages; leave blank for no title"),
-            ("embed_title_join_leave", "Server Event", "Embed title for join/leave messages; leave blank for no title"),
-            ("embed_title_other", "Server Notification", "Embed title for other messages; leave blank for no title"),
-            ("embed_footer_text", "Chatrelay", "Footer text for all embeds; leave blank for no footer"),
-            ("embed_avatar_player", True, "Show player avatar in player message embeds"),
-            ("embed_avatar_join_leave", True, "Show player avatar in join/leave embeds"),
-            ("embed_avatar_other", False, "Show avatar in other message embeds"),
+            ("message_type.player", "image", 'ONLY applies to player messages. Options: image | plaintext | embed.'),
+            ("message_type.join_leave", "image", 'ONLY applies to join/leave messages. Options: image | plaintext | embed.'),
+            ("message_type.other", "image", 'ONLY applies to other messages (death, broadcast...). Options: image | plaintext | embed.'),
+            ("show_warning_on_bad_config_value", False, "Whether to log warnings if a key is wrong."),
+            ("embed.color.player", 5614830, "Embed color for player messages (decimal format)"),
+            ("embed.color.join_leave", 3066993, "Embed color for join/leave messages (decimal format)"),
+            ("embed.color.other", 15158332, "Embed color for other messages (decimal format)"),
+            ("embed.title.player", "Chat", "Embed title for player messages; leave blank for no title"),
+            ("embed.title.join_leave", "Server Event", "Embed title for join/leave messages; leave blank for no title"),
+            ("embed.title.other", "Server Notification", "Embed title for other messages; leave blank for no title"),
+            ("embed.footer_text", "Chatrelay", "Footer text for all embeds; leave blank for no footer"),
+            ("embed.avatar.player", True, "Show player avatar in player message embeds"),
+            ("embed.avatar.join_leave", True, "Show player avatar in join/leave embeds"),
+            ("embed.avatar.other", False, "Show avatar in other message embeds"),
         ]
         if cfg_path.exists():
             with open(cfg_path, "r", encoding="utf-8") as f:
@@ -47,35 +87,66 @@ class ChatRelay(Plugin):
             if not isinstance(existing, CommentedMap):
                 existing = CommentedMap(existing or {})
             
-            # Migration
+            # Migration for font_path
             if "font_path" in existing:
                 old_path = existing.pop("font_path")
                 if old_path and "fonts" not in existing:
                     existing["fonts"] = [old_path]
+
+            # Migration for old flat keys to nested keys
+            migrations = {
+                "player_message_type": "message_type.player",
+                "join_or_leave_message_type": "message_type.join_leave",
+                "other_messages_type": "message_type.other",
+                "embed_color_player": "embed.color.player",
+                "embed_color_join_leave": "embed.color.join_leave",
+                "embed_color_other": "embed.color.other",
+                "embed_title_player": "embed.title.player",
+                "embed_title_join_leave": "embed.title.join_leave",
+                "embed_title_other": "embed.title.other",
+                "embed_footer_text": "embed.footer_text",
+                "embed_avatar_player": "embed.avatar.player",
+                "embed_avatar_join_leave": "embed.avatar.join_leave",
+                "embed_avatar_other": "embed.avatar.other",
+            }
+
+            for old_key, new_key_path in migrations.items():
+                if old_key in existing:
+                    val = existing.pop(old_key)
+                    keys = new_key_path.split(".")
+                    curr = existing
+                    for k in keys[:-1]:
+                        if k not in curr: curr[k] = CommentedMap()
+                        curr = curr[k]
+                    if keys[-1] not in curr:
+                        curr[keys[-1]] = val
         else:
             existing = CommentedMap()
 
         for key, default, comment in defaults:
-            if key not in existing:
-                existing[key] = default
-                existing.yaml_add_eol_comment(comment, key)
+            keys = key.split(".")
+            curr = existing
+            for k in keys[:-1]:
+                if k not in curr: curr[k] = CommentedMap()
+                curr = curr[k]
+            
+            if keys[-1] not in curr:
+                curr[keys[-1]] = default
+            
+            # Always ensure the comment is there
+            curr.yaml_add_eol_comment(comment, keys[-1])
 
         with open(cfg_path, "w", encoding="utf-8") as f:
             self.yml.dump(existing, f)
 
-        self.yaml_config = dict(existing)
+        self._config = ChatRelayConfig(**commented_map_to_dict(existing))
 
     def on_enable(self):
         self.install()
 
-        self.webhook_url = cast(str, self.yaml_config.get("webhook_url"))
-        config_fonts = self.yaml_config.get("fonts", [])
-        if isinstance(config_fonts, str):
-            config_fonts = [config_fonts]
-        
         self.resolved_fonts = []
         fonts_dir = Path(self.data_folder) / "fonts"
-        for f in config_fonts:
+        for f in self.config.fonts:
             p = Path(f)
             if p.exists():
                 self.resolved_fonts.append(str(p.absolute()))
@@ -86,10 +157,12 @@ class ChatRelay(Plugin):
                 else:
                     self.logger.error(f"Font not found: {f} (checked absolute path and {fonts_dir})")
 
-        if not self.webhook_url:
+        if not self.config.webhook_url:
             self.logger.error("Chatrelay will NOT function! Fill out `webhook_url` before reloading the plugin.")
-        elif not self.resolved_fonts:
-            self.logger.error("Chatrelay will NOT function! No valid fonts found in `fonts` config.")
+        elif not self.resolved_fonts and any(
+            t == "image" for t in [self.config.message_type.player, self.config.message_type.join_leave, self.config.message_type.other]
+        ):
+            self.logger.error("Chatrelay will NOT function! No valid fonts found but 'image' type is enabled.")
         else:
             self.register_events(self)
         self.logger.info("If your config is bad, delete it and Chatrelay will make a new one for you.")
@@ -158,7 +231,7 @@ class ChatRelay(Plugin):
     def _send_as_image(self, message: str):
         if len(message) > 100:
             DiscordWebhook(
-                url=self.webhook_url,
+                url=self.config.webhook_url,
                 content=self.remove_mentions(message=message),
             ).execute()
             return
@@ -238,7 +311,7 @@ class ChatRelay(Plugin):
                 data = f.read()
 
             DiscordWebhook(
-                url=self.webhook_url,
+                url=self.config.webhook_url,
                 content=" ",
                 files={png_path.name: (png_path.name, data)},
             ).execute()
@@ -275,17 +348,18 @@ class ChatRelay(Plugin):
 
     def _send_as_plaintext(self, message: str):
         DiscordWebhook(
-            url=self.webhook_url,
+            url=self.config.webhook_url,
             content=self.remove_mentions(self._resolve_to_plaintext(message=message))
         ).execute()
 
     def _send_as_embed(self, message: str, category: str, player: str = ""):
         plain = self.remove_mentions(self._resolve_to_plaintext(message=message))
         
-        color = cast(int, self.yaml_config.get(f"embed_color_{category}", 0))
-        title = cast(str, self.yaml_config.get(f"embed_title_{category}", ""))
-        footer = cast(str, self.yaml_config.get("embed_footer_text", ""))
-        show_avatar = cast(bool, self.yaml_config.get(f"embed_avatar_{category}", False))
+        # Access namespaced config values
+        color = getattr(self.config.embed.color, category, 0)
+        title = getattr(self.config.embed.title, category, "")
+        footer = self.config.embed.footer_text
+        show_avatar = getattr(self.config.embed.avatar, category, False)
         
         embed = DiscordEmbed(title=title, description=plain, color=color)
         embed.set_footer(text=footer)
@@ -301,7 +375,7 @@ class ChatRelay(Plugin):
             except Exception:
                 embed.set_author(name=player)
             
-        webhook = DiscordWebhook(url=self.webhook_url)
+        webhook = DiscordWebhook(url=self.config.webhook_url)
         webhook.add_embed(embed)
         webhook.execute()
 
@@ -312,7 +386,7 @@ class ChatRelay(Plugin):
         if message == "":
             return
         def task():
-            message_type = cast(str, self.yaml_config.get("player_message_type", "image"))
+            message_type = self.config.message_type.player
             try:
                 if message_type == "image":
                     self._send_as_image(message=message)
@@ -321,8 +395,8 @@ class ChatRelay(Plugin):
                 elif message_type == "embed":
                     self._send_as_embed(message=message, category="player", player=player)
                 else:
-                    if not self.yaml_config.get("other_messages_type"):
-                        self._warn(f'Message "{message}" was not sent because your config has an invalid option.')
+                    if self.config.show_warning_on_bad_config_value:
+                        self._warn(f'Message "{message}" was not sent because your config has an invalid option: {message_type}')
             except Exception as e:
                 print("ERROR !!!!!!!!!!!!! 😭😭😭 Check following!! 🥺🥺🥺 ", e)
         if not self.last_message == message:
@@ -333,7 +407,7 @@ class ChatRelay(Plugin):
         if message == "":
             return
         def task():
-            message_type = cast(str, self.yaml_config.get("join_or_leave_message_type", "image"))
+            message_type = self.config.message_type.join_leave
             try:
                 if message_type == "image":
                     self._send_as_image(message=message)
@@ -342,8 +416,8 @@ class ChatRelay(Plugin):
                 elif message_type == "embed":
                     self._send_as_embed(message=message, category="join_leave", player=player)
                 else:
-                    if not self.yaml_config.get("other_messages_type"):
-                        self._warn(f'Message "{message}" was not sent because your config has an invalid option.')
+                    if self.config.show_warning_on_bad_config_value:
+                        self._warn(f'Message "{message}" was not sent because your config has an invalid option: {message_type}')
             except Exception as e:
                 print("ERROR !!!!!!!!!!!!! 😭😭😭 Check following!! 🥺🥺🥺 ", e)
         if not self.last_message == message:
@@ -354,7 +428,7 @@ class ChatRelay(Plugin):
         if message == "":
             return
         def task():
-            message_type = cast(str, self.yaml_config.get("other_messages_type", "image"))
+            message_type = self.config.message_type.other
             try:
                 if message_type == "image":
                     self._send_as_image(message=message)
@@ -363,8 +437,8 @@ class ChatRelay(Plugin):
                 elif message_type == "embed":
                     self._send_as_embed(message=message, category="other")
                 else:
-                    if not self.yaml_config.get("other_messages_type"):
-                        self._warn(f'Message "{message}" was not sent because your config has an invalid option.')
+                    if self.config.show_warning_on_bad_config_value:
+                        self._warn(f'Message "{message}" was not sent because your config has an invalid option: {message_type}')
             except Exception as e:
                 print("ERROR !!!!!!!!!!!!! 😭😭😭 Check following!! 🥺🥺🥺 ", e)
         if not self.last_message == message:
