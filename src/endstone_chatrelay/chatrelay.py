@@ -253,10 +253,20 @@ class ChatRelay(Plugin):
         def get_font_for_char(c):
             if c.isspace():
                 return loaded_fonts[0]
-            for f in loaded_fonts:
+            
+            # The last font is our source of truth (the robust one)
+            robust_font = loaded_fonts[-1]
+            
+            # If it's not supported by the robust one, don't even try artistic fonts.
+            if robust_font.getmask(c).getbbox() is None:
+                return robust_font
+            
+            # If it IS supported by the robust one, try artistic fonts in order.
+            for f in loaded_fonts[:-1]:
                 if f.getmask(c).getbbox() is not None:
                     return f
-            return loaded_fonts[0]
+            
+            return robust_font
 
         def text_width(t: str):
             w = 0
