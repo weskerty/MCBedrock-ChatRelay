@@ -40,8 +40,14 @@ class EmbedConfig(BaseModel):
     footer_text: str = "Chatrelay"
     avatar: EmbedAvatarConfig = Field(default_factory=EmbedAvatarConfig)
 
+class WebhooksConfig(BaseModel):
+    player: list[str] = Field(default_factory=list)
+    join_leave: list[str] = Field(default_factory=list)
+    other: list[str] = Field(default_factory=list)
+
 class ChatRelayConfig(BaseModel):
     webhook_url: str = ""
+    webhooks: WebhooksConfig = Field(default_factory=WebhooksConfig)
     fonts: list[str] = Field(default_factory=list)
     message_type: MessageTypeConfig = Field(default_factory=MessageTypeConfig)
     show_warning_on_bad_config_value: bool = False
@@ -55,6 +61,12 @@ class ChatRelay(Plugin):
     def config(self) -> ChatRelayConfig:
         return self._config
 
+    def get_webhook_urls(self, category: str) -> list[str]:
+        webhooks = getattr(self.config.webhooks, category)
+        if not webhooks:
+            return [self.config.webhook_url] if self.config.webhook_url else []
+        return webhooks
+
     def install(self):
         folder = Path(self.data_folder)
         folder.mkdir(parents=True, exist_ok=True)
@@ -64,7 +76,10 @@ class ChatRelay(Plugin):
         self.yml.version = (1, 2)
         self.yml.preserve_quotes = True
         defaults = [
-            ("webhook_url", "", "Discord webhook URL"),
+            ("webhook_url", "", "Primary (and fallback) Discord webhook URL"),
+            ("webhooks.player", [], "List of Discord webhook URLs for player messages"),
+            ("webhooks.join_leave", [], "List of Discord webhook URLs for join/leave messages"),
+            ("webhooks.other", [], "List of Discord webhook URLs for other messages"),
             ("fonts", [], "List of font filenames (searched in the 'fonts' folder) or full paths. Supports fallbacks."),
             ("message_type.player", "image", 'ONLY applies to player messages. Options: image | plaintext | embed.'),
             ("message_type.join_leave", "image", 'ONLY applies to join/leave messages. Options: image | plaintext | embed.'),
@@ -228,12 +243,14 @@ class ChatRelay(Plugin):
         text = re.sub(r'@(\w+)', r'\1', text)
         return text
 
-    def _send_as_image(self, message: str):
+    def _send_as_image(self, message: str, category: str):
+        webhook_urls = self.get_webhook_urls(category)
         if len(message) > 100:
-            DiscordWebhook(
-                url=self.config.webhook_url,
-                content=self.remove_mentions(message=message),
-            ).execute()
+            for url in webhook_urls:
+                DiscordWebhook(
+                    url=url,
+                    content=self.remove_mentions(message=message),
+                ).execute()
             return
 
         chunks = self.parse_minecraft(message)
@@ -320,11 +337,12 @@ class ChatRelay(Plugin):
             with open(png_path, "rb") as f:
                 data = f.read()
 
-            DiscordWebhook(
-                url=self.config.webhook_url,
-                content=" ",
-                files={png_path.name: (png_path.name, data)},
-            ).execute()
+            for url in webhook_urls:
+                DiscordWebhook(
+                    url=url,
+                    content=" ",
+                    files={png_path.name: (png_path.name, data)},
+                ).execute()
 
             try:
                 png_path.unlink()
@@ -356,11 +374,13 @@ class ChatRelay(Plugin):
                 result += text
         return result
 
-    def _send_as_plaintext(self, message: str):
-        DiscordWebhook(
-            url=self.config.webhook_url,
-            content=self.remove_mentions(self._resolve_to_plaintext(message=message))
-        ).execute()
+    def _send_as_plaintext(self, message: str, category: str):
+        webhook_urls = self.get_webhook_urls(category)
+        for url in webhook_urls:
+            DiscordWebhook(
+                url=url,
+                content=self.remove_mentions(self._resolve_to_plaintext(message=message))
+            ).execute()
 
     def _send_as_embed(self, message: str, category: str, player: str = ""):
         plain = self.remove_mentions(self._resolve_to_plaintext(message=message))
@@ -385,9 +405,11 @@ class ChatRelay(Plugin):
             except Exception:
                 embed.set_author(name=player)
             
-        webhook = DiscordWebhook(url=self.config.webhook_url)
-        webhook.add_embed(embed)
-        webhook.execute()
+        webhook_urls = self.get_webhook_urls(category)
+        for url in webhook_urls:
+            webhook = DiscordWebhook(url=url)
+            webhook.add_embed(embed)
+            webhook.execute()
 
     def _warn(self, message: str):
         self.server.scheduler.run_task(self, lambda: self.logger.warning(message))
@@ -399,9 +421,9 @@ class ChatRelay(Plugin):
             message_type = self.config.message_type.player
             try:
                 if message_type == "image":
-                    self._send_as_image(message=message)
+                    self._send_as_image(message=message, category="player")
                 elif message_type == "plaintext": 
-                    self._send_as_plaintext(message=message)
+                    self._send_as_plaintext(message=message, category="player")
                 elif message_type == "embed":
                     self._send_as_embed(message=message, category="player", player=player)
                 else:
@@ -420,9 +442,9 @@ class ChatRelay(Plugin):
             message_type = self.config.message_type.join_leave
             try:
                 if message_type == "image":
-                    self._send_as_image(message=message)
+                    self._send_as_image(message=message, category="join_leave")
                 elif message_type == "plaintext": 
-                    self._send_as_plaintext(message=message)
+                    self._send_as_plaintext(message=message, category="join_leave")
                 elif message_type == "embed":
                     self._send_as_embed(message=message, category="join_leave", player=player)
                 else:
@@ -441,9 +463,9 @@ class ChatRelay(Plugin):
             message_type = self.config.message_type.other
             try:
                 if message_type == "image":
-                    self._send_as_image(message=message)
+                    self._send_as_image(message=message, category="other")
                 elif message_type == "plaintext": 
-                    self._send_as_plaintext(message=message)
+                    self._send_as_plaintext(message=message, category="other")
                 elif message_type == "embed":
                     self._send_as_embed(message=message, category="other")
                 else:
