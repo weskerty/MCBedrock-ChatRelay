@@ -1,7 +1,8 @@
-<div align="center">
+# endstone ChatRelay
 
-# endstone-chatrelay
+Relays Minecraft chat (messages, joins, quits, deaths, broadcasts) to Telegram/Discord.  
 
+<<<<<<< Updated upstream
 </div>
 
 
@@ -11,22 +12,44 @@ https://github.com/user-attachments/assets/df7440fe-0601-4ef0-8454-f93e7847c3bd
 
 
 A plugin that publi minecraft chat, joins, quits, and deaths.
+=======
+https://github.com/user-attachments/assets/df7440fe-0601-4ef0-8454-f93e7847c3bd
+>>>>>>> Stashed changes
 
 
-</details>
 
-# setup
+## Install
 
-1. Take the .whl file from the latest release and put it into the server’s plugins/ folder
+[Download Plugin >](https://github.com/weskerty/endstone-chatrelay/releases/download/Plugin/endstone_chatrelay-3.0.0-py2.py3-none-any.whl) and Move file in endstone/bedrock_server/plugins
 
-2. Install redis on endstone server
-python -m pip install redis
+Start the server once — config is generated at `plugins/ChatRelay/config.yml` or manual;
 
-2. Start the server once, then *(optionally)* close it
-- This creates the config file
+## config.yml
 
-3. Open plugins/ChatRelay/config.yml and config redis or valkey
+```yaml
+telegram:
+  token: ""        # Bot token from @BotFather — leave empty to disable
+  chat_id: ""      # Plain group: -100IDGROUP
+                   # Topic group: -100IDGROUP/IDTHREAD
+discord:
+  webhook: ""      # Webhook URL — leave empty to disable
+log: true          # Log relayed messages to server console
+```
 
-4. Ejecute plugins scripts
+### Exampl
 
+```yaml
+telegram:
+  token: '8xxx1:AAH_mxxxY'
+  chat_id: '-1006799699989/736788'
+discord:
+  webhook: 'https://discord.com/api/webhooks/6xxx7/6xxxi_Sxxx7-gxxxT'
+log: false
+```
+
+I use Arch btw and Endstone SystemD Service 
+
+<<<<<<< Updated upstream
 4. Start the server again, and it will load. Otherwise, the logs will tell you why it didn't!
+=======
+>>>>>>> Stashed changes

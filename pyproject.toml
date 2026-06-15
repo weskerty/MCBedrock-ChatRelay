@@ -4,18 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "endstone-chatrelay"
-version = "2.1.0"
-description = "Relays chat to a Discord webhook"
-authors = [
-    { name = "niko-at-chalupa"}
-]
+version = "3.0.0"
+description = "Minecraft chat relay to Telegram and Discord"
+authors = [{ name = "niko-at-chalupa" }]
 dependencies = [
-    "discord-webhook",
-    "pillow",
     "ruamel.yaml",
     "endstone",
-    "pydantic",
 ]
+
 [project.entry-points."endstone"]
 chatrelay = "endstone_chatrelay:ChatRelay"
 
