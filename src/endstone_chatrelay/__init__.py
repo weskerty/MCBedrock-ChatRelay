@@ -1,3 +1,3 @@
-from .chatrelay import ChatRelay
+from .chatbridge import ChatBridge
 
-__all__ = ["ChatRelay"]
+__all__ = ["ChatBridge"]
