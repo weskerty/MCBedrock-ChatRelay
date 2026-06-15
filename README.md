@@ -2,20 +2,9 @@
 
 Relays Minecraft chat (messages, joins, quits, deaths, broadcasts) to Telegram/Discord.  
 
-<<<<<<< Updated upstream
-</div>
-
 
 
 https://github.com/user-attachments/assets/df7440fe-0601-4ef0-8454-f93e7847c3bd
-
-
-
-A plugin that publi minecraft chat, joins, quits, and deaths.
-=======
-https://github.com/user-attachments/assets/df7440fe-0601-4ef0-8454-f93e7847c3bd
->>>>>>> Stashed changes
-
 
 
 ## Install
@@ -49,7 +38,3 @@ log: false
 
 I use Arch btw and Endstone SystemD Service 
 
-<<<<<<< Updated upstream
-4. Start the server again, and it will load. Otherwise, the logs will tell you why it didn't!
-=======
->>>>>>> Stashed changes
