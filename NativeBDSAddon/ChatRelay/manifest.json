@@ -1,0 +1,33 @@
+{
+    "format_version": 2,
+    "header": {
+        "name": "ChatRelay",
+        "description": "MC Chat to TG&DC",
+        "uuid": "538d2b26-b186-4382-b8e1-c74c7a2491f4",
+        "version": [1, 0, 1],
+        "min_engine_version": [1, 21, 0]
+    },
+    "modules": [
+        {
+            "type": "script",
+            "language": "javascript",
+            "uuid": "17f8a35a-a30b-4fd4-bdd3-608d277e8535",
+            "version": [1, 0, 1],
+            "entry": "scripts/main.js"
+        }
+    ],
+    "dependencies": [
+        {
+            "module_name": "@minecraft/server",
+            "version": "beta"
+        },
+        {
+            "module_name": "@minecraft/server-admin",
+            "version": "beta"
+        },
+        {
+            "module_name": "@minecraft/server-net",
+            "version": "beta"
+        }
+    ]
+}
