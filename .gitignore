@@ -3,3 +3,7 @@ dist/
 endstone/
 **__pycache__
 bedrock_server/
+node_modules
+links.json
+package-lock.json
+.env
